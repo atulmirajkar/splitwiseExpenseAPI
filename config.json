@@ -1,0 +1,9 @@
+{
+  "AccessTokenURL"  :"",
+	"AuthorizeURL"   :"",
+	"RequestTokenURL" :"",
+	"ConsumerKey"     :"",
+	"ConsumerSecret"  :"",
+	"CallbackURL"     : ""
+}
+  

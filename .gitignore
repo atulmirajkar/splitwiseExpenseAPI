@@ -1,0 +1,10 @@
+*.log
+*.db
+*.lock
+.idea*
+*.iml
+*.txt
+debug
+*.csv
+*vscode
+splitwiseconfig.json
