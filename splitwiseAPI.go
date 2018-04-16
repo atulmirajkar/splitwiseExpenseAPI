@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"splitwise/controller"
+	"splitwiseExpenseAPi/controller"
 
 	"github.com/gorilla/mux"
 )

@@ -119,14 +119,13 @@ func CompleteAuth(w http.ResponseWriter, r *http.Request) {
 		Trace.Fatal(err)
 	}
 
-	if _, err = os.Stat("expenses.csv"); err == nil {
+	_, err = os.Stat("expenses.csv")
+	if !os.IsNotExist(err) {
 		err := os.Remove("expenses.csv")
 		if err != nil {
 			Trace.Fatalln(err)
 		}
 
-	} else {
-		Trace.Fatalln(err)
 	}
 
 	f, err := os.OpenFile("expenses.csv", os.O_CREATE, 0755)
@@ -159,6 +158,7 @@ func GetURLForGroup(groupID float64) string {
 	requestURL, _ := url.Parse("https://secure.splitwise.com/api/v3.0/get_expenses")
 	requestQuery := requestURL.Query()
 	requestQuery.Set("group_id", strconv.FormatFloat(groupID, 'f', 0, 64))
+	requestQuery.Set("limit", "0")
 	requestURL.RawQuery = requestQuery.Encode()
 	return requestURL.String()
 }
@@ -211,8 +211,12 @@ func getUserInfo(userArr []interface{}) string {
 		userInfoMap := userMap["user"].(map[string]interface{})
 		userName := userInfoMap["first_name"].(string)
 		userName = strings.Replace(userName, ",", "", -1)
-		userShare := userMap["owed_share"].(string)
-		userShare = strings.Replace(userShare, ",", "", -1)
+		userShare := ""
+		if userMap["owed_share"] != nil {
+			userShare = userMap["owed_share"].(string)
+			userShare = strings.Replace(userShare, ",", "", -1)
+
+		}
 
 		tempStrArr := []string{userName, userShare}
 		tempStr := strings.Join(tempStrArr, "_")
