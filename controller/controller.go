@@ -1,16 +1,19 @@
 package controller
 
 import (
+	"bufio"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
-
-	"net/url"
+	"time"
 
 	"github.com/dghubble/oauth1"
 )
@@ -33,6 +36,7 @@ var splitwiseAuthConfig = new(oauth1.Config)
 var requestTok = ""
 var requestSec = ""
 
+var sessionToken *oauth1.Token
 var config = new(Configuration)
 var ConfigFilePath string
 
@@ -102,10 +106,13 @@ func CompleteAuth(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		Trace.Fatal(err)
 	}
-	token := oauth1.NewToken(accessToken, accessSecret)
+	sessionToken = oauth1.NewToken(accessToken, accessSecret)
 
+}
+
+func saveExpenseDataToCSV() {
 	// httpClient will automatically authorize http.Request's
-	httpClient := splitwiseAuthConfig.Client(oauth1.NoContext, token)
+	httpClient := splitwiseAuthConfig.Client(oauth1.NoContext, sessionToken)
 	response, err := httpClient.Get("https://secure.splitwise.com/api/v3.0/get_groups")
 
 	defer response.Body.Close()
@@ -140,20 +147,16 @@ func CompleteAuth(w http.ResponseWriter, r *http.Request) {
 	groupDatArr := groupData.(map[string]interface{})["groups"].([]interface{})
 	for _, group := range groupDatArr {
 		groupMap := group.(map[string]interface{})
-		//fmt.Fprintf(w, "%s \n", groupMap["name"])
 		requestURL := GetURLForGroup(groupMap["id"].(float64))
 		expenseResponse, _ := httpClient.Get(requestURL)
 		contents, _ := ioutil.ReadAll(expenseResponse.Body)
-		//fmt.Fprintf(w, "%s\n", contents)
 
 		defer f.Close()
 
-		expenseLine := writeExpenseDataForGroup(contents, groupMap["name"].(string), f)
-		fmt.Fprintf(w, "%s\n", expenseLine)
-
+		writeExpenseDataForGroup(contents, groupMap["name"].(string), f)
 	}
-}
 
+}
 func GetURLForGroup(groupID float64) string {
 	requestURL, _ := url.Parse("https://secure.splitwise.com/api/v3.0/get_expenses")
 	requestQuery := requestURL.Query()
@@ -201,6 +204,7 @@ func writeExpenseDataForGroup(expensesData []byte, groupName string, file *os.Fi
 		}
 
 	}
+	//replace quotes in string
 	return expenseLine
 }
 
@@ -229,4 +233,82 @@ func getUserInfo(userArr []interface{}) string {
 
 	}
 	return userLine
+}
+
+type ExpenseLine struct {
+	Group       string
+	Date        string
+	Description string
+	Category    string
+	Cost        string
+	User        string
+	Share       string
+}
+
+func GetStoredJson(w http.ResponseWriter, r *http.Request) {
+	//check file creation/modification time
+	// get last modified time
+	fileInfo, err := os.Stat("./expenses.csv")
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	modifiedtime := fileInfo.ModTime()
+	currentTime := time.Now()
+
+	timeDiff := currentTime.Sub(modifiedtime)
+
+	if timeDiff.Seconds() > 500 {
+		saveExpenseDataToCSV()
+	}
+	//read file
+	csvFile, err := os.Open("./expenses.csv")
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+	defer csvFile.Close()
+
+	//csv reader
+	csvReader := csv.NewReader(bufio.NewReader(csvFile))
+
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+
+	var expenseLine ExpenseLine
+	var expenses []ExpenseLine
+
+	for {
+		each, error := csvReader.Read()
+		if error == io.EOF {
+			break
+		} else if error != nil {
+			Trace.Println(error)
+			break
+		}
+
+		expenseLine.Group = each[0]
+		expenseLine.Date = each[1]
+		expenseLine.Description = each[2]
+		expenseLine.Category = each[3]
+		expenseLine.Cost = each[4]
+		expenseLine.User = each[5]
+		expenseLine.Share = each[6]
+
+		//add to expenses object
+		expenses = append(expenses, expenseLine)
+	}
+
+	// Convert to JSON
+	jsonData, err := json.Marshal(expenses)
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonData)
 }

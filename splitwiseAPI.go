@@ -32,6 +32,7 @@ func main() {
 	//add handlers
 	router.HandleFunc("/", controller.IndexHandler)
 	http.HandleFunc("/expenses", controller.CompleteAuth)
+	http.HandleFunc("/getStoredJson", controller.GetStoredJson)
 
 	//listen
 	err := http.ListenAndServe(":9093", nil)
