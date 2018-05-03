@@ -110,6 +110,27 @@ func CompleteAuth(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func getCurrentUserID() string {
+	// httpClient will automatically authorize http.Request's
+	httpClient := splitwiseAuthConfig.Client(oauth1.NoContext, sessionToken)
+	response, err := httpClient.Get("https://secure.splitwise.com/api/v3.0/get_current_user")
+
+	defer response.Body.Close()
+	contents, err := ioutil.ReadAll(response.Body)
+
+	var userData interface{}
+	err = json.Unmarshal(contents, &userData)
+	if err != nil {
+		Trace.Fatal(err)
+	}
+
+	userDataObj := userData.(map[string]interface{})
+	userDataMap := userDataObj["user"].(map[string]interface{})
+
+	return strconv.FormatFloat(userDataMap["id"].(float64), 'f', 0, 64)
+
+}
+
 func saveExpenseDataToCSV() {
 	// httpClient will automatically authorize http.Request's
 	httpClient := splitwiseAuthConfig.Client(oauth1.NoContext, sessionToken)
@@ -118,24 +139,23 @@ func saveExpenseDataToCSV() {
 	defer response.Body.Close()
 	contents, err := ioutil.ReadAll(response.Body)
 
-	//fmt.Fprintf(w, "Content: %s\n", contents)
-
 	var groupData interface{}
 	err = json.Unmarshal(contents, &groupData)
 	if err != nil {
 		Trace.Fatal(err)
 	}
 
-	_, err = os.Stat("expenses.csv")
-	if !os.IsNotExist(err) {
-		err := os.Remove("expenses.csv")
+	fileName := getCurrentUserID() + ".csv"
+	_, err = os.Stat(fileName)
+	if err != nil {
+		err := os.Remove(fileName)
 		if err != nil {
-			Trace.Fatalln(err)
+			Trace.Println(err)
 		}
 
 	}
 
-	f, err := os.OpenFile("expenses.csv", os.O_CREATE, 0755)
+	f, err := os.Create(fileName)
 	if err != nil {
 		Trace.Fatalln(err)
 	}
@@ -157,6 +177,7 @@ func saveExpenseDataToCSV() {
 	}
 
 }
+
 func GetURLForGroup(groupID float64) string {
 	requestURL, _ := url.Parse("https://secure.splitwise.com/api/v3.0/get_expenses")
 	requestQuery := requestURL.Query()
@@ -248,10 +269,16 @@ type ExpenseLine struct {
 func GetStoredJson(w http.ResponseWriter, r *http.Request) {
 	//check file creation/modification time
 	// get last modified time
-	fileInfo, err := os.Stat("./expenses.csv")
+	fileName := getCurrentUserID() + ".csv"
+	fileInfo, err := os.Stat(fileName)
 
+	if err != nil && os.IsNotExist(err) {
+		saveExpenseDataToCSV()
+		fileInfo, err = os.Stat(fileName)
+	}
 	if err != nil {
-		fmt.Println(err)
+		Trace.Println(err)
+		return
 	}
 
 	modifiedtime := fileInfo.ModTime()
@@ -263,7 +290,7 @@ func GetStoredJson(w http.ResponseWriter, r *http.Request) {
 		saveExpenseDataToCSV()
 	}
 	//read file
-	csvFile, err := os.Open("./expenses.csv")
+	csvFile, err := os.Open(fileName)
 	if err != nil {
 		Trace.Println(err)
 		return
