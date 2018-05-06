@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,8 +17,14 @@ import (
 	"time"
 
 	"github.com/dghubble/oauth1"
+	"github.com/gorilla/securecookie"
+	"github.com/pkg/errors"
 )
 
+type sessionValues struct {
+	sessionID string
+	token     *oauth1.Token
+}
 type Configuration struct {
 	AccessTokenURL  string `json:"AccessTokenURL"`
 	AuthorizeURL    string `json:"AuthorizeURL"`
@@ -36,7 +43,9 @@ var splitwiseAuthConfig = new(oauth1.Config)
 var requestTok = ""
 var requestSec = ""
 
-var sessionToken *oauth1.Token
+var cookieHandler = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
+var sessionMapper = make(map[string]*sessionValues)
+
 var config = new(Configuration)
 var ConfigFilePath string
 
@@ -106,11 +115,41 @@ func CompleteAuth(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		Trace.Fatal(err)
 	}
-	sessionToken = oauth1.NewToken(accessToken, accessSecret)
 
+	sessionToken := oauth1.NewToken(accessToken, accessSecret)
+	user := getCurrentUserID(sessionToken)
+
+	sessionID := createSessionID()
+	value := map[string]string{
+		"username":  user,
+		"sessionid": sessionID,
+	}
+	encoded, err := cookieHandler.Encode("clientMap", value)
+	if err != nil {
+		Trace.Println("error encoding cookie")
+		errors.Wrap(err, "error encoding cookie")
+	}
+	cookie := &http.Cookie{
+		Name:   "clientMap",
+		Value:  encoded,
+		Path:   "/",
+		MaxAge: 300, //5 minutes
+	}
+	http.SetCookie(w, cookie)
+
+	//save session in a map
+	sessionMapper[user] = &sessionValues{sessionID: sessionID, token: sessionToken}
 }
 
-func getCurrentUserID() string {
+func createSessionID() string {
+	//return a random string
+	timeNow := time.Now()
+	randSource := timeNow.Hour()*3600 + timeNow.Minute()*60 + timeNow.Second()
+	r := rand.New(rand.NewSource(int64(randSource)))
+	return strconv.Itoa(r.Intn(100000))
+}
+
+func getCurrentUserID(sessionToken *oauth1.Token) string {
 	// httpClient will automatically authorize http.Request's
 	httpClient := splitwiseAuthConfig.Client(oauth1.NoContext, sessionToken)
 	response, err := httpClient.Get("https://secure.splitwise.com/api/v3.0/get_current_user")
@@ -131,7 +170,119 @@ func getCurrentUserID() string {
 
 }
 
-func saveExpenseDataToCSV() {
+func GetStoredJson(w http.ResponseWriter, r *http.Request) {
+	sessionVals := validateSessionAndGetUser(r)
+	if sessionVals == nil {
+		return
+	}
+
+	user := getCurrentUserID(sessionVals.token)
+	//check file creation/modification time
+	// get last modified time
+	fileName := user + ".csv"
+	fileInfo, err := os.Stat(fileName)
+
+	if err != nil && os.IsNotExist(err) {
+		saveExpenseDataToCSV(sessionVals.token)
+		fileInfo, err = os.Stat(fileName)
+	}
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+
+	modifiedtime := fileInfo.ModTime()
+	currentTime := time.Now()
+
+	timeDiff := currentTime.Sub(modifiedtime)
+
+	if timeDiff.Seconds() > 500 {
+		saveExpenseDataToCSV(sessionVals.token)
+	}
+	//read file
+	csvFile, err := os.Open(fileName)
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+	defer csvFile.Close()
+
+	//csv reader
+	csvReader := csv.NewReader(bufio.NewReader(csvFile))
+
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+
+	var expenseLine ExpenseLine
+	var expenses []ExpenseLine
+
+	for {
+		each, error := csvReader.Read()
+		if error == io.EOF {
+			break
+		} else if error != nil {
+			Trace.Println(error)
+			break
+		}
+
+		expenseLine.Group = each[0]
+		expenseLine.Date = each[1]
+		expenseLine.Description = each[2]
+		expenseLine.Category = each[3]
+		expenseLine.Cost = each[4]
+		expenseLine.User = each[5]
+		expenseLine.Share = each[6]
+
+		//add to expenses object
+		expenses = append(expenses, expenseLine)
+	}
+
+	// Convert to JSON
+	jsonData, err := json.Marshal(expenses)
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonData)
+}
+
+func validateSessionAndGetUser(request *http.Request) *sessionValues {
+	var cookieUserName string
+	var cookieSession string
+	var storedSession string
+
+	//get cookie from client request
+	cookie, err := request.Cookie("clientMap")
+	if err != nil {
+		Trace.Println(err)
+		return nil
+
+	}
+	cookieValue := make(map[string]string)
+	err = cookieHandler.Decode("clientMap", cookie.Value, &cookieValue)
+	if err != nil {
+		Trace.Println(err)
+		return nil
+	}
+
+	cookieUserName = cookieValue["username"]
+	cookieSession = cookieValue["sessionid"]
+	storedSession = sessionMapper[cookieUserName].sessionID
+	//compare session ids
+	if cookieSession != storedSession {
+		return nil
+	}
+
+	//get stored sessionid from server
+	return sessionMapper[cookieUserName]
+
+}
+
+func saveExpenseDataToCSV(sessionToken *oauth1.Token) {
 	// httpClient will automatically authorize http.Request's
 	httpClient := splitwiseAuthConfig.Client(oauth1.NoContext, sessionToken)
 	response, err := httpClient.Get("https://secure.splitwise.com/api/v3.0/get_groups")
@@ -145,7 +296,10 @@ func saveExpenseDataToCSV() {
 		Trace.Fatal(err)
 	}
 
-	fileName := getCurrentUserID() + ".csv"
+	user := getCurrentUserID(sessionToken)
+	//check file creation/modification time
+	// get last modified time
+	fileName := user + ".csv"
 	_, err = os.Stat(fileName)
 	if err != nil {
 		err := os.Remove(fileName)
@@ -264,78 +418,4 @@ type ExpenseLine struct {
 	Cost        string
 	User        string
 	Share       string
-}
-
-func GetStoredJson(w http.ResponseWriter, r *http.Request) {
-	//check file creation/modification time
-	// get last modified time
-	fileName := getCurrentUserID() + ".csv"
-	fileInfo, err := os.Stat(fileName)
-
-	if err != nil && os.IsNotExist(err) {
-		saveExpenseDataToCSV()
-		fileInfo, err = os.Stat(fileName)
-	}
-	if err != nil {
-		Trace.Println(err)
-		return
-	}
-
-	modifiedtime := fileInfo.ModTime()
-	currentTime := time.Now()
-
-	timeDiff := currentTime.Sub(modifiedtime)
-
-	if timeDiff.Seconds() > 500 {
-		saveExpenseDataToCSV()
-	}
-	//read file
-	csvFile, err := os.Open(fileName)
-	if err != nil {
-		Trace.Println(err)
-		return
-	}
-	defer csvFile.Close()
-
-	//csv reader
-	csvReader := csv.NewReader(bufio.NewReader(csvFile))
-
-	if err != nil {
-		Trace.Println(err)
-		return
-	}
-
-	var expenseLine ExpenseLine
-	var expenses []ExpenseLine
-
-	for {
-		each, error := csvReader.Read()
-		if error == io.EOF {
-			break
-		} else if error != nil {
-			Trace.Println(error)
-			break
-		}
-
-		expenseLine.Group = each[0]
-		expenseLine.Date = each[1]
-		expenseLine.Description = each[2]
-		expenseLine.Category = each[3]
-		expenseLine.Cost = each[4]
-		expenseLine.User = each[5]
-		expenseLine.Share = each[6]
-
-		//add to expenses object
-		expenses = append(expenses, expenseLine)
-	}
-
-	// Convert to JSON
-	jsonData, err := json.Marshal(expenses)
-	if err != nil {
-		Trace.Println(err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonData)
 }
