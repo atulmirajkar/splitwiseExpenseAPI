@@ -139,6 +139,7 @@ func CompleteAuth(w http.ResponseWriter, r *http.Request) {
 
 	//save session in a map
 	sessionMapper[user] = &sessionValues{sessionID: sessionID, token: sessionToken}
+	http.Redirect(w, r, "http://localhost:4125?file="+user, http.StatusFound)
 }
 
 func createSessionID() string {
@@ -168,6 +169,82 @@ func getCurrentUserID(sessionToken *oauth1.Token) string {
 
 	return strconv.FormatFloat(userDataMap["id"].(float64), 'f', 0, 64)
 
+}
+
+func GetStoredJsonFile(w http.ResponseWriter, r *http.Request) {
+	user := r.URL.Query().Get("file")
+
+	//check file creation/modification time
+	// get last modified time
+	fileName := user + ".csv"
+	fileInfo, err := os.Stat(fileName)
+
+	if err != nil && os.IsNotExist(err) {
+		saveExpenseDataToCSV(sessionMapper[user].token)
+		fileInfo, err = os.Stat(fileName)
+	}
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+
+	modifiedtime := fileInfo.ModTime()
+	currentTime := time.Now()
+
+	timeDiff := currentTime.Sub(modifiedtime)
+
+	if timeDiff.Seconds() > 500 {
+		saveExpenseDataToCSV(sessionMapper[user].token)
+	}
+	//read file
+	csvFile, err := os.Open(fileName)
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+	defer csvFile.Close()
+
+	//csv reader
+	csvReader := csv.NewReader(bufio.NewReader(csvFile))
+
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+
+	var expenseLine ExpenseLine
+	var expenses []ExpenseLine
+
+	for {
+		each, error := csvReader.Read()
+		if error == io.EOF {
+			break
+		} else if error != nil {
+			Trace.Println(error)
+			break
+		}
+
+		expenseLine.Group = each[0]
+		expenseLine.Date = each[1]
+		expenseLine.Description = each[2]
+		expenseLine.Category = each[3]
+		expenseLine.Cost = each[4]
+		expenseLine.User = each[5]
+		expenseLine.Share = each[6]
+
+		//add to expenses object
+		expenses = append(expenses, expenseLine)
+	}
+
+	// Convert to JSON
+	jsonData, err := json.Marshal(expenses)
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonData)
 }
 
 func GetStoredJson(w http.ResponseWriter, r *http.Request) {

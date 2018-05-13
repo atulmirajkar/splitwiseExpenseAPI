@@ -33,6 +33,7 @@ func main() {
 	router.HandleFunc("/", controller.IndexHandler)
 	http.HandleFunc("/expenses", controller.CompleteAuth)
 	http.HandleFunc("/getStoredJson", controller.GetStoredJson)
+	http.HandleFunc("/getStoredJsonFile", controller.GetStoredJsonFile)
 
 	//listen
 	err := http.ListenAndServe(":9093", nil)
