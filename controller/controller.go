@@ -32,6 +32,8 @@ type Configuration struct {
 	ConsumerKey     string `json:"ConsumerKey"`
 	ConsumerSecret  string `json:"ConsumerSecret"`
 	CallbackURL     string `json: "CallbackURL"`
+	DataPath        string `json: "DataPath"`
+	ShinyPort       string `json: "ShinyPort"`
 }
 
 var Trace *log.Logger
@@ -139,7 +141,7 @@ func CompleteAuth(w http.ResponseWriter, r *http.Request) {
 
 	//save session in a map
 	sessionMapper[user] = &sessionValues{sessionID: sessionID, token: sessionToken}
-	http.Redirect(w, r, "http://localhost:4125?file="+user, http.StatusFound)
+	http.Redirect(w, r, "http://localhost:"+config.ShinyPort+"?file="+user, http.StatusFound)
 }
 
 func createSessionID() string {
@@ -170,13 +172,23 @@ func getCurrentUserID(sessionToken *oauth1.Token) string {
 	return strconv.FormatFloat(userDataMap["id"].(float64), 'f', 0, 64)
 
 }
+func getUserFilePath(user string) (string, error) {
+	if user == "" {
+		return "", errors.New("user file path is empty")
+	}
+	return config.DataPath + "\\" + user + ".csv", nil
+}
 
 func GetStoredJsonFile(w http.ResponseWriter, r *http.Request) {
 	user := r.URL.Query().Get("file")
 
 	//check file creation/modification time
 	// get last modified time
-	fileName := user + ".csv"
+	fileName, err := getUserFilePath(user)
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
 	fileInfo, err := os.Stat(fileName)
 
 	if err != nil && os.IsNotExist(err) {
@@ -256,7 +268,11 @@ func GetStoredJson(w http.ResponseWriter, r *http.Request) {
 	user := getCurrentUserID(sessionVals.token)
 	//check file creation/modification time
 	// get last modified time
-	fileName := user + ".csv"
+	fileName, err := getUserFilePath(user)
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
 	fileInfo, err := os.Stat(fileName)
 
 	if err != nil && os.IsNotExist(err) {
@@ -376,7 +392,11 @@ func saveExpenseDataToCSV(sessionToken *oauth1.Token) {
 	user := getCurrentUserID(sessionToken)
 	//check file creation/modification time
 	// get last modified time
-	fileName := user + ".csv"
+	fileName, err := getUserFilePath(user)
+	if err != nil {
+		Trace.Println(err)
+		return
+	}
 	_, err = os.Stat(fileName)
 	if err != nil {
 		err := os.Remove(fileName)
