@@ -1,9 +1,11 @@
 {
-  "AccessTokenURL"  :"",
-	"AuthorizeURL"   :"",
-	"RequestTokenURL" :"",
-	"ConsumerKey"     :"",
-	"ConsumerSecret"  :"",
-	"CallbackURL"     : ""
+  "AccessTokenURL"  :	"",
+	"AuthorizeURL"   	:	"",
+	"RequestTokenURL" :	"",
+	"ConsumerKey"     :	"",
+	"ConsumerSecret"  :	"",
+	"CallbackURL"     : "",
+	"DataPath"  			: "",
+	"ShinyPort"				: "",
+	"HostString"			: ""
 }
-  

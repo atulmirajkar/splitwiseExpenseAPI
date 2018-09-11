@@ -34,6 +34,7 @@ type Configuration struct {
 	CallbackURL     string `json: "CallbackURL"`
 	DataPath        string `json: "DataPath"`
 	ShinyPort       string `json: "ShinyPort"`
+	HostString      string `json; "HostString"`
 }
 
 var Trace *log.Logger
@@ -141,7 +142,7 @@ func CompleteAuth(w http.ResponseWriter, r *http.Request) {
 
 	//save session in a map
 	sessionMapper[user] = &sessionValues{sessionID: sessionID, token: sessionToken}
-	http.Redirect(w, r, "http://localhost:"+config.ShinyPort+"?file="+user, http.StatusFound)
+	http.Redirect(w, r, "http://"+config.HostString+":"+config.ShinyPort+"?file="+user, http.StatusFound)
 }
 
 func createSessionID() string {
