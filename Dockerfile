@@ -29,11 +29,11 @@ COPY --from=builder /go/bin/splitwiseExpenseAPI .
 
 #copy static html and config files
 #COPY --from=builder /go/src/splitwiseExpenseAPI/view ./view
-COPY --from=builder /go/src/splitwiseExpenseAPI/config.json ./splitwiseconfig.json
+#COPY --from=builder /go/src/splitwiseExpenseAPI/config.json ./splitwiseconfig.json
 
 
 #entrypoint
-ENTRYPOINT ["/go/bin/splitwiseExpenseAPI","-config=splitwiseconfig.json","-log=/data/splitwiseExpenseAPIServer.log"]
+ENTRYPOINT ["/go/bin/splitwiseExpenseAPI","-config=/data/splitwiseconfig.json","-log=/data/splitwiseExpenseAPIServer.log"]
 #expose port
 EXPOSE 9093
 

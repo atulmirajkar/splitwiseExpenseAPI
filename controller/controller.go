@@ -177,7 +177,7 @@ func getUserFilePath(user string) (string, error) {
 	if user == "" {
 		return "", errors.New("user file path is empty")
 	}
-	return config.DataPath + "\\" + user + ".csv", nil
+	return config.DataPath + "/" + user + ".csv", nil
 }
 
 func GetStoredJsonFile(w http.ResponseWriter, r *http.Request) {
